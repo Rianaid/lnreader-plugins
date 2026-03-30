@@ -9,18 +9,8 @@ class Jaomix implements Plugin.PagePlugin {
   id = 'jaomix.ru';
   name = 'Jaomix';
   site = 'https://jaomix.ru';
-  version = '1.0.5';
+  version = '1.0.6';
   icon = 'src/ru/jaomix/icon.png';
-
-  // Вспомогательная функция для извлечения номера главы из названия
-  private extractChapterNumber(name: string): number {
-    // Ищем "Глава 123" или "Chapter 123" (регистр не важен)
-    const match = name.match(/(?:глава|chapter)\s*(\d+)/i);
-    if (match) return parseInt(match[1], 10);
-    // Если нет, ищем любое число в названии
-    const numMatch = name.match(/\d+/);
-    return numMatch ? parseInt(numMatch[0], 10) : 0;
-  }
 
   async popularNovels(
     pageNo: number,
@@ -110,6 +100,7 @@ class Jaomix implements Plugin.PagePlugin {
       }
     });
 
+    // Определяем количество страниц пагинации
     const totalPages = loadedCheerio('.sel-toc > option').length;
     const allChapters: Plugin.ChapterItem[] = [];
 
@@ -117,7 +108,8 @@ class Jaomix implements Plugin.PagePlugin {
       // Нет пагинации — парсим главы из текущей страницы
       this.parseChaptersToArray(loadedCheerio, allChapters);
     } else {
-      // Загружаем все страницы (от 1 до totalPages)
+      // Загружаем страницы от 1 до totalPages
+      // На сайте страницы идут от новых глав к старым (1 — новые, totalPages — старые)
       for (let page = 1; page <= totalPages; page++) {
         const pageBody = await fetchApi(`${this.site}/wp-admin/admin-ajax.php`, {
           method: 'POST',
@@ -137,16 +129,15 @@ class Jaomix implements Plugin.PagePlugin {
       }
     }
 
-    // Сортируем главы по извлечённому номеру
-    allChapters.sort((a, b) => 
-      this.extractChapterNumber(a.name) - this.extractChapterNumber(b.name)
-    );
-
+    // Теперь в allChapters сначала самые новые главы, потом старые.
+    // Разворачиваем массив, чтобы получить порядок от старых к новым (1,2,3...)
+    allChapters.reverse();
     novel.chapters = allChapters;
+
     return novel;
   }
 
-  // Вспомогательный метод: парсит главы и добавляет в переданный массив (без сортировки)
+  // Парсит главы и добавляет в переданный массив (в порядке, как на странице)
   private parseChaptersToArray(loadedCheerio: CheerioAPI, target: Plugin.ChapterItem[]) {
     loadedCheerio('div.title').each((_, element) => {
       const name = loadedCheerio(element).find('a').attr('title');
@@ -162,7 +153,7 @@ class Jaomix implements Plugin.PagePlugin {
     });
   }
 
-  // Оставлен для совместимости (не используется, т.к. totalPages = 1)
+  // Оставлен для совместимости (не используется)
   async parsePage(novelPath: string, page: string): Promise<Plugin.SourcePage> {
     const body = await fetchApi(`${this.site}/wp-admin/admin-ajax.php`, {
       method: 'POST',
