@@ -124,24 +124,24 @@ class Jaomix implements Plugin.PagePlugin {
     };
   }
 
-  parseChapters(loadedCheerio: CheerioAPI) {
+parseChapters(loadedCheerio: CheerioAPI) {
     const chapters: Plugin.ChapterItem[] = [];
 
     loadedCheerio('div.title').each((_, element) => {
-      const name = loadedCheerio(element).find('a').attr('title');
-      const url = loadedCheerio(element).find('a').attr('href');
-      if (!name || !url) return;
+        const name = loadedCheerio(element).find('a').attr('title');
+        const url = loadedCheerio(element).find('a').attr('href');
+        if (!name || !url) return;
 
-      const releaseDate = loadedCheerio(element).find('time').text();
-      chapters.push({
-        name,
-        path: url.replace(this.site, ''),
-        releaseTime: this.parseDate(releaseDate),
-      });
+        const releaseDate = loadedCheerio(element).find('time').text();
+        chapters.push({
+            name,
+            path: url.replace(this.site, ''),
+            releaseTime: this.parseDate(releaseDate),
+        });
     });
 
-    return chapters;
-  }
+    return chapters.reverse(); // ← инвертируем порядок
+}
 
   async parseChapter(chapterPath: string): Promise<string> {
     const body = await fetchApi(this.site + chapterPath).then(res =>
