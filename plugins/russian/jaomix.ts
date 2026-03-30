@@ -9,7 +9,7 @@ class Jaomix implements Plugin.PagePlugin {
   id = 'jaomix.ru';
   name = 'Jaomix';
   site = 'https://jaomix.ru';
-  version = '1.0.4.1';
+  version = '1.0.4'; // увеличиваем версию
   icon = 'src/ru/jaomix/icon.png';
 
   async popularNovels(
@@ -83,7 +83,8 @@ class Jaomix implements Plugin.PagePlugin {
       name: loadedCheerio('div[class="desc-book"] > h1').text().trim(),
       cover: loadedCheerio('div[class="img-book"] > img').attr('src'),
       summary: loadedCheerio('div[id="desc-tab"]').text().trim(),
-      totalPages: loadedCheerio('.sel-toc > option').length,
+      totalPages: 1, // временно, потом перезапишем после сбора глав
+      chapters: [],
     };
 
     loadedCheerio('#info-book > p').each(function () {
@@ -98,11 +99,44 @@ class Jaomix implements Plugin.PagePlugin {
           : NovelStatus.Completed;
       }
     });
-    novel.chapters = this.parseChapters(loadedCheerio);
+
+    // Определяем общее количество страниц с главами
+    const totalPages = loadedCheerio('.sel-toc > option').length;
+    if (totalPages <= 1) {
+      // Если всего одна страница или пагинации нет — загружаем главы из текущего HTML
+      novel.chapters = this.parseChapters(loadedCheerio);
+    } else {
+      // Загружаем все страницы последовательно
+      const allChapters: Plugin.ChapterItem[] = [];
+      for (let page = 1; page <= totalPages; page++) {
+        const pageBody = await fetchApi(`${this.site}/wp-admin/admin-ajax.php`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Referer: this.site + novelPath,
+            Origin: this.site,
+          },
+          body: new URLSearchParams({
+            action: 'loadpagenavchapstt',
+            page: page.toString(),
+          }).toString(),
+        }).then(res => res.text());
+
+        const pageCheerio = parseHTML(pageBody);
+        const pageChapters = this.parseChapters(pageCheerio);
+        allChapters.push(...pageChapters);
+      }
+      novel.chapters = allChapters;
+    }
+
+    // Устанавливаем totalPages = 1, чтобы приложение не запрашивало дополнительные страницы
+    novel.totalPages = 1;
     return novel;
   }
 
   async parsePage(novelPath: string, page: string): Promise<Plugin.SourcePage> {
+    // Этот метод оставлен для совместимости, но в новых версиях приложения не вызывается,
+    // так как totalPages = 1. Однако он может потребоваться для старых версий.
     const body = await fetchApi(`${this.site}/wp-admin/admin-ajax.php`, {
       method: 'POST',
       headers: {
@@ -124,24 +158,25 @@ class Jaomix implements Plugin.PagePlugin {
     };
   }
 
-parseChapters(loadedCheerio: CheerioAPI) {
+  parseChapters(loadedCheerio: CheerioAPI) {
     const chapters: Plugin.ChapterItem[] = [];
 
     loadedCheerio('div.title').each((_, element) => {
-        const name = loadedCheerio(element).find('a').attr('title');
-        const url = loadedCheerio(element).find('a').attr('href');
-        if (!name || !url) return;
+      const name = loadedCheerio(element).find('a').attr('title');
+      const url = loadedCheerio(element).find('a').attr('href');
+      if (!name || !url) return;
 
-        const releaseDate = loadedCheerio(element).find('time').text();
-        chapters.push({
-            name,
-            path: url.replace(this.site, ''),
-            releaseTime: this.parseDate(releaseDate),
-        });
+      const releaseDate = loadedCheerio(element).find('time').text();
+      chapters.push({
+        name,
+        path: url.replace(this.site, ''),
+        releaseTime: this.parseDate(releaseDate),
+      });
     });
 
-    return chapters.reverse(); // ← инвертируем порядок
-}
+    // Инвертируем порядок глав (сайт выводит от новых к старым, нам нужно от старых к новым)
+    return chapters.reverse();
+  }
 
   async parseChapter(chapterPath: string): Promise<string> {
     const body = await fetchApi(this.site + chapterPath).then(res =>
@@ -149,10 +184,20 @@ parseChapters(loadedCheerio: CheerioAPI) {
     );
     const loadedCheerio = parseHTML(body);
 
+    // Удаляем рекламные блоки
     loadedCheerio('.adblock-service, .lazyblock').remove();
-    const chapterText = loadedCheerio('.entry-content').html() || '';
 
-    return chapterText.replace(/<a[^>]*>(.*?)<\/a>/gi, '$1');
+    // Обрабатываем все ссылки внутри .entry-content, превращая относительные в абсолютные
+    const content = loadedCheerio('.entry-content');
+    content.find('a').each((_, el) => {
+      const href = loadedCheerio(el).attr('href');
+      if (href && !href.startsWith('http')) {
+        const absoluteUrl = new URL(href, this.site).href;
+        loadedCheerio(el).attr('href', absoluteUrl);
+      }
+    });
+
+    return content.html() || '';
   }
 
   async searchNovels(
